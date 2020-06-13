@@ -28,8 +28,16 @@
 #define default_host "localhost"
 #define default_port "31337"
 
-int count = 0;
+static int count = 0;
+static FILE *fp;
 
+/*
+ * get_socket_fd: function for setting up the server socket.
+ * This function is given the host and port the server should bind to.
+ * Error out if any of getaddrinfo(), socket() setsockopt() or bind() fail.
+ *
+ * Returns the file descriptor for this server process after it's bound to the given host:port
+ */
 int get_socket_fd(char *host, char *port) {
   const int sockopt = 1;
   struct addrinfo *addy;
@@ -58,11 +66,13 @@ int get_socket_fd(char *host, char *port) {
   return sockfd;
 }
 
+/*
+ * do_thread_work: function performed in worker processes
+ */
 void do_thread_work(int sockfd) {
   int client_fd;
   struct sockaddr_in client_addr;
   char prompt[32];
-  //char *msgbuf = malloc(64 * sizeof(char) );
   size_t buflen;
   socklen_t client_addr_len = sizeof(client_addr);
   printf("in work thread\n");
@@ -73,7 +83,7 @@ void do_thread_work(int sockfd) {
     if ( client_fd == -1 ) {
       perror("could not accept a connection");
     }
-    sprintf(prompt, "this is child thread %d", getpid());
+    sprintf(prompt, "this is child thread %d\n", getpid());
     count++;
     // ssize_t send(int sockfd, const void *buf, size_t len, int flags);
     buflen = send(client_fd, prompt, strlen(prompt), 0);
@@ -81,17 +91,18 @@ void do_thread_work(int sockfd) {
       perror("could not send message to client");
       break;
     }
-    printf("  read %d bytes from child\n", (int)buflen);
+    printf("  sent %d bytes to child\n", (int)buflen);
     close(client_fd);
   }
 }
 
-void log_write(FILE *fp, char *msg) {
+void log_write(char *msg) {
   // time invocation thanks to https://en.cppreference.com/w/c/chrono/asctime
   struct tm now = *localtime(&(time_t){time(NULL)});
   char time_str[32];
   strftime(time_str, sizeof(time_str), "%c", &now); // use strftime so I can customize timetamp string
   fprintf(fp, "%s %s", time_str, msg);
+  fflush(fp);
 }
 
 int main(int argc, char** argv) {
@@ -112,16 +123,15 @@ int main(int argc, char** argv) {
 
 
   char logfile[] = "/tmp/myserver.log";
-  FILE *logf;
-  logf = fopen(logfile, "a");
-  //logfd = open(logfile, O_WRONLY | O_APPEND | O_CREAT, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
-  if ( logf == NULL ) {
+  fp = fopen(logfile, "a");
+  if ( fp == NULL ) {
     perror("could not open log file");
     exit(1);
   }
 
   char buf[] = "Log file init\n";
-  log_write(logf, buf);
+  log_write(buf);
+  printf("wrote init to logfile %s\n", logfile);
 
   sockfd = get_socket_fd(host, port);
   if (listen(sockfd, 100) == -1) {
