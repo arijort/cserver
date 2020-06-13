@@ -28,8 +28,13 @@
 #define default_host "localhost"
 #define default_port "31337"
 
+static int MAXBUF = 256; // max size of message received from client
 static int count = 0;
 static FILE *fp;
+
+// declarations
+int readline(int fd, void *buf, size_t maxlen);
+void log_write(char *msg);
 
 /*
  * get_socket_fd: function for setting up the server socket.
@@ -73,7 +78,13 @@ void do_thread_work(int sockfd) {
   int client_fd;
   struct sockaddr_in client_addr;
   char prompt[32];
+  char request_log_line[MAXBUF + 32];
   size_t buflen;
+  pid_t childpid = getpid();
+
+  // Handling data from the client
+  char client_buf[MAXBUF];
+  int client_msg_size;
   socklen_t client_addr_len = sizeof(client_addr);
   printf("in work thread\n");
 
@@ -83,7 +94,7 @@ void do_thread_work(int sockfd) {
     if ( client_fd == -1 ) {
       perror("could not accept a connection");
     }
-    sprintf(prompt, "this is child thread %d\n", getpid());
+    sprintf(prompt, "this is server thread %d\n", childpid);
     count++;
     // ssize_t send(int sockfd, const void *buf, size_t len, int flags);
     buflen = send(client_fd, prompt, strlen(prompt), 0);
@@ -92,22 +103,62 @@ void do_thread_work(int sockfd) {
       break;
     }
     printf("  sent %d bytes to child\n", (int)buflen);
+
+    // get data from client
+    client_msg_size = readline(client_fd, client_buf, MAXBUF);
+    sprintf(request_log_line, "server %d recvd message \"%s\" from client\n", childpid, client_buf);
+    printf("%s\n", request_log_line);
+    log_write(request_log_line);
+    sleep(3);
+    send(client_fd, request_log_line, strlen(request_log_line), 0);
     close(client_fd);
   }
 }
 
+/*
+ * readline inspired by Stevens from https://www.informit.com/articles/article.aspx?p=169505&seqNum=9
+ *
+ * Return size of data read from client connection.
+ */
+int readline(int fd, void *buf, size_t maxlen) {
+  size_t n, rc;
+  char c, *ptr;
+  ptr = buf;
+  for (n=1 ; n < maxlen; n++) {
+    if ( (rc = read(fd, &c, 1)) == 1 ) {
+      if ( c == '\n' )
+        break;
+      *ptr++ = c;
+    }
+    else if ( rc == 0 ) {
+      *ptr = 0;
+      return (n - 1);
+    }
+    else
+      return -1;
+  }
+  *ptr = 0;
+  return (n);
+}
+
 void log_write(char *msg) {
-  // time invocation thanks to https://en.cppreference.com/w/c/chrono/asctime
-  struct tm now = *localtime(&(time_t){time(NULL)});
+  struct tm *now;
+  struct timespec spec;
+  time_t seconds;
+  long ns;
+  clock_gettime(CLOCK_REALTIME, &spec);
+  seconds = spec.tv_sec;
+  ns = spec.tv_nsec;
+  now = localtime(&seconds);
   char time_str[32];
-  strftime(time_str, sizeof(time_str), "%c", &now); // use strftime so I can customize timetamp string
-  fprintf(fp, "%s %s", time_str, msg);
+  strftime(time_str, sizeof(time_str), "%Y %B %d %H:%M:%S", now); // use strftime so I can customize timetamp string
+  fprintf(fp, "%s.%ld -- %s", time_str, ns, msg);
   fflush(fp);
 }
 
 int main(int argc, char** argv) {
   int sockfd;
-  int numchild = 3;
+  int numchild = 1000;
   size_t msglen;
   char host[32], port[32];
   pid_t childpid;
