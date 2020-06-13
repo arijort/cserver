@@ -60,7 +60,7 @@ int get_socket_fd(char *host, char *port) {
 
 void do_thread_work(int sockfd) {
   int client_fd;
-  struct sockaddr *client_addr;
+  struct sockaddr_in client_addr;
   char prompt[32];
   //char *msgbuf = malloc(64 * sizeof(char) );
   size_t buflen;
@@ -68,19 +68,22 @@ void do_thread_work(int sockfd) {
   printf("in work thread\n");
 
   // int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
-  client_fd = accept(sockfd, client_addr, &client_addr_len);
-  if ( client_fd == -1 ) {
-    perror("could not accept a connection");
+  for(;;) {
+    client_fd = accept(sockfd, (struct sockaddr *)&client_addr, &client_addr_len);
+    if ( client_fd == -1 ) {
+      perror("could not accept a connection");
+    }
+    sprintf(prompt, "this is child thread %d", getpid());
+    count++;
+    // ssize_t send(int sockfd, const void *buf, size_t len, int flags);
+    buflen = send(client_fd, prompt, strlen(prompt), 0);
+    if ( buflen == -1 ) {
+      perror("could not send message to client");
+      break;
+    }
+    printf("  read %d bytes from child\n", (int)buflen);
+    close(client_fd);
   }
-  sprintf(prompt, "this is child thread %d", getpid());
-  count++;
-  // ssize_t send(int sockfd, const void *buf, size_t len, int flags);
-  buflen = send(client_fd, prompt, strlen(prompt), 0);
-  if ( buflen == -1 ) {
-    perror("could not send message to client");
-  }
-  printf("  read %d bytes from child\n", (int)buflen);
-  close(client_fd);
 }
 
 void log_write(FILE *fp, char *msg) {
