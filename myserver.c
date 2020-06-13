@@ -22,8 +22,11 @@
 #include <netdb.h> /* getaddrinfo() dependency */
 #include <fcntl.h> /* open() dependency */
 #include <string.h> /* strlen() dependency */
+#include<time.h>
 
 #define usage "myserver <server> <port>"
+#define default_host "localhost"
+#define default_port "31337"
 
 int count = 0;
 
@@ -80,18 +83,30 @@ void do_thread_work(int sockfd) {
   close(client_fd);
 }
 
+void log_write(FILE *fp, char *msg) {
+  // time invocation thanks to https://en.cppreference.com/w/c/chrono/asctime
+  struct tm now = *localtime(&(time_t){time(NULL)});
+  char time_str[32];
+  strftime(time_str, sizeof(time_str), "%c", &now); // use strftime so I can customize timetamp string
+  fprintf(fp, "%s %s", time_str, msg);
+}
 
 int main(int argc, char** argv) {
-  int sockfd ;
+  int sockfd;
   int numchild = 3;
   size_t msglen;
+  char host[32], port[32];
   pid_t childpid;
   if ( argc != 3 ) {
-    printf("Error: %s\n", usage);
-    exit(1);
+    printf("Using default host:port %s:%s\n", default_host, default_port);
+    strcpy(host, default_host);
+    strcpy(port, default_port);
+  }
+  else {
+    strcpy(host, argv[1]);
+    strcpy(port, argv[2]);
   }
 
-  //        FILE *fopen(const char *pathname, const char *mode);
 
   char logfile[] = "/tmp/myserver.log";
   FILE *logf;
@@ -102,15 +117,8 @@ int main(int argc, char** argv) {
     exit(1);
   }
 
-  fprintf(logf, "hello log file\n");
-  //msglen = send(logfd, msgbuf, strlen(msgbuf), 0);
-  if ( msglen == -1 ) {
-    perror("could not write to log file");
-  }
- 
-
-  char *host = argv[1];
-  char *port = argv[2];
+  char buf[] = "Log file init\n";
+  log_write(logf, buf);
 
   sockfd = get_socket_fd(host, port);
   if (listen(sockfd, 100) == -1) {
