@@ -14,13 +14,13 @@
 
 #include<stdlib.h>
 #include<stdio.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h> /* fork() dependency */
-#include <sys/wait.h>
-#include <netdb.h> /* getaddrinfo() dependency */
-#include <fcntl.h> /* open() dependency */
-#include <string.h> /* strlen() dependency */
+#include<sys/socket.h>
+#include<sys/types.h>
+#include<unistd.h> /* fork() dependency */
+#include<sys/wait.h>
+#include<netdb.h> /* getaddrinfo() dependency */
+#include<fcntl.h> /* open() dependency */
+#include<string.h> /* strlen() dependency */
 #include<time.h>
 #include<stdbool.h>
 
@@ -28,8 +28,11 @@
 #define default_host "localhost"
 #define default_port "31337"
 
+typedef enum protocol_result {exception = -2, authorization = -1, success = 0} protocol_result;
+
 static const int MAXARGBUF = 32; // max size of parameters for host, port.
-static const int MAXBUF = 256; // max size of message received from client
+static const int MAXBUF = 1024; // max size of message received from client
+static const int BACKLOG = 100; // backlog on listen()
 static int count = 0;
 static FILE *fp;
 static const char delim = ':';
@@ -37,8 +40,9 @@ static const char *users[] = { "arijort", "foobar" }; // externalize to config f
 static const int num_users = sizeof(users) / sizeof(users[0]);
 
 // declarations
-int readline(int fd, void *buf, size_t maxlen);
-int do_auth_read(const void *msg, void *username, void *buf, size_t maxlen);
+int get_socket_fd(char *host, char *port);
+int readline(int fd, char *client_buf);
+protocol_result do_auth_read(const void *msg, void *username, void *buf);
 void log_write(char *msg);
 
 /*
@@ -53,26 +57,36 @@ int get_socket_fd(char *host, char *port) {
   struct addrinfo *addy;
   int sockfd;
 
+  // 1 setup address info
   if ( getaddrinfo(host, port, NULL, &addy) != 0 ) {
     perror("could not get address info\n");
     exit(1);
   }
 
+  // 2 create socket
   sockfd = socket(addy->ai_family, addy->ai_socktype, addy->ai_protocol);
   if (sockfd == -1 ) {
     perror("could not create a socket\n");
     exit(1);
   }
+  // 3 set reuse option
   if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (const void *)&sockopt, sizeof(int)) == -1) {
     perror("could not create a socket\n");
     exit(1);
   }
 
+  // 4 bind to the socket
   if ( bind(sockfd, addy->ai_addr, addy->ai_addrlen) != 0 ) {
     perror("could not bind");
     exit(1);
   }
   freeaddrinfo(addy);
+
+  // 5 set listener
+  if (listen(sockfd, BACKLOG) == -1) {
+    perror("could not listen");
+  }
+
   return sockfd;
 }
 
@@ -82,7 +96,7 @@ int get_socket_fd(char *host, char *port) {
 void do_thread_work(int sockfd) {
   int client_fd;
   struct sockaddr_in client_addr;
-  char prompt[MAXARGBUF];
+  char prompt[MAXARGBUF]; // buffer for sending prompt to client on connect
   char request_line[MAXBUF + 32];
   char end_line[MAXBUF + 32];
   size_t buflen;
@@ -93,8 +107,8 @@ void do_thread_work(int sockfd) {
   char client_msg[MAXBUF];
   char username[MAXARGBUF];
   int client_msg_size;
+  protocol_result pr;
   socklen_t client_addr_len = sizeof(client_addr);
-  printf("in work thread\n");
 
   sprintf(prompt, "this is server thread %d\n", childpid);
   // int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
@@ -108,31 +122,30 @@ void do_thread_work(int sockfd) {
       perror("could not send message to client");
       break;
     }
-    //printf("  sent %d bytes to child\n", (int)buflen);
 
     // get data from client
-    client_msg_size = readline(client_fd, client_buf, MAXBUF);
+    client_msg_size = readline(client_fd, client_buf);
     if ( client_msg_size == -1 ) {
       log_write("protocol error from client");
       close(client_fd);
       break;
     }
-    client_msg_size = do_auth_read(client_buf, username, client_msg, MAXBUF);
-    if ( client_msg_size == -1 ) {
+    pr = do_auth_read(client_buf, username, client_msg);
+    if ( pr == authorization ) {
       log_write("authorization error");
       close(client_fd);
       break;
     }
-    if ( client_msg_size == -2 ) {
+    if ( pr == exception ) {
       log_write("protocol error");
       close(client_fd);
       break;
     }
     sprintf(request_line, "server %d recvd message \"%s\" from user %s", childpid, client_msg, username);
     log_write(request_line);
-    //sleep(3); // do computationally intensive work which adds latency
+    sleep(3); // do computationally intensive work which adds latency
     send(client_fd, request_line, strlen(request_line), 0);
-    sprintf(end_line, "completed request on %d", childpid );
+    sprintf(end_line, "completed request \"%s\" on %d", client_msg, childpid );
     log_write(end_line);
     close(client_fd);
   }
@@ -162,36 +175,40 @@ bool do_auth_user(const char *username) {
  * Return -2 for a protocol error e.g. missing colon.
  * Put the message without auth info into *buf.
  */
-int do_auth_read(const void *msg, void *username, void *buf, size_t maxlen) {
+protocol_result do_auth_read(const void *msg, void *username, void *buf) {
   int rc = 0;
   char *delim_point;
   size_t msg_len = strlen(msg);
   delim_point = strchr(msg, delim);
   if ( delim_point == NULL )
-    return -2; // protocol error if no colon
+    return exception; // protocol error if no colon
   rc = delim_point - (char *)msg +1;
   strncpy(username, msg, rc - 1);
   if ( ! do_auth_user(username) )
-    return -1;
+    return authorization;
   // Copy message, IOW string to the right of the colon, into buffer for caller
   strncpy(buf, msg + rc, msg_len - rc);
-  return strlen(buf);
+  return success;
+  
 }
 /*
  * readline inspired by Stevens from https://www.informit.com/articles/article.aspx?p=169505&seqNum=9
  * Correct this would not be thread safe but we are forking processes here.
  */
-int readline(int fd, void *buf, size_t maxlen) {
-  size_t rc;
-  char c[MAXBUF];
-  char *newline;
-  rc = read(fd, buf, maxlen);
-  newline = strchr(buf, '\n');
-  if ( newline == NULL )
-    return -1; // protocol error if no newline
-  *newline = '\0'; // null-terminate string at first newline
-  //printf("new buf -%s-\n", (char *)buf); 
-  return rc;
+int readline(int fd, char *client_buf) {
+  size_t client_read;
+  char buffer[MAXBUF];
+  int msglen = 0;
+  while ( (client_read = read(fd, buffer+msglen, MAXBUF)) > 0 ) {
+    msglen += client_read;
+    if ( buffer[msglen-1] == '\n' ) break;
+  }
+  if ( client_read < 0 ) {
+    perror("error on receiving data from client");
+  }
+  buffer[msglen-1] = 0;
+  strcpy(client_buf, buffer);
+  return msglen;
 }
 
 int readline_slow(int fd, void *buf, size_t maxlen) {
@@ -226,13 +243,13 @@ void log_write(char *msg) {
   now = localtime(&seconds);
   char time_str[MAXARGBUF];
   strftime(time_str, sizeof(time_str), "%Y.%m.%d %H:%M:%S", now); // use strftime so I can customize timetamp string
-  fprintf(fp, "%s.%ld -- %s\n", time_str, ns, msg);
+  fprintf(fp, "%s.%09ld -- %s\n", time_str, ns, msg);
   fflush(fp);
 }
 
 int main(int argc, char** argv) {
   int sockfd;
-  int numchild = 3;
+  int numchild = 1000;
   char host[MAXARGBUF], port[MAXARGBUF];
   pid_t childpid;
   if ( argc != 3 ) {
@@ -256,9 +273,6 @@ int main(int argc, char** argv) {
   log_write(buf);
 
   sockfd = get_socket_fd(host, port);
-  if (listen(sockfd, 100) == -1) {
-    perror("could not listen");
-  }
 
   for ( int i = 0 ; i < numchild; i++) {
     childpid = fork();
@@ -266,11 +280,7 @@ int main(int argc, char** argv) {
       perror("could not fork");
     }
     else if ( childpid == 0 ) {
-      printf("this is the child thread with sockfd %d\n", sockfd);
       do_thread_work(sockfd);
-    }
-    else {
-      printf("this is the parent thread at iteration %d with child pid %d\n", i, childpid);
     }
   }
   while (waitpid(-1, NULL, 0) > 0);
