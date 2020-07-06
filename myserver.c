@@ -23,6 +23,7 @@
 #include<string.h> /* strlen() dependency */
 #include<time.h>
 #include<stdbool.h>
+#include <sys/mman.h>
 
 #define usage "myserver <server> <port>"
 #define default_host "localhost"
@@ -30,6 +31,7 @@
 
 typedef enum protocol_result {exception = -2, authorization = -1, success = 0} protocol_result;
 
+static const int MMAPSIZE = 64; // size of memory segment shared with child procs
 static const int MAXARGBUF = 32; // max size of parameters for host, port.
 static const int MAXBUF = 1024; // max size of message received from client
 static const int BACKLOG = 100; // backlog on listen()
@@ -44,6 +46,8 @@ int get_socket_fd(char *host, char *port);
 int readline(int fd, char *client_buf);
 protocol_result do_auth_read(const void *msg, void *username, void *buf);
 void log_write(char *msg);
+int *create_shared_mem();
+void do_thread_work(int sockfd, int *p_mmap);
 
 /*
  * get_socket_fd: function for setting up the server socket.
@@ -93,7 +97,7 @@ int get_socket_fd(char *host, char *port) {
 /*
  * do_thread_work: function performed in worker processes
  */
-void do_thread_work(int sockfd) {
+void do_thread_work(int sockfd, int *p_mmap) {
   int client_fd;
   struct sockaddr_in client_addr;
   char prompt[MAXARGBUF]; // buffer for sending prompt to client on connect
@@ -143,11 +147,13 @@ void do_thread_work(int sockfd) {
     }
     sprintf(request_line, "server %d recvd message \"%s\" from user %s", childpid, client_msg, username);
     log_write(request_line);
-    sleep(3); // do computationally intensive work which adds latency
+    // sleep(3); // do computationally intensive work which adds latency
     send(client_fd, request_line, strlen(request_line), 0);
-    sprintf(end_line, "completed request \"%s\" on %d", client_msg, childpid );
+    (*p_mmap)++;
+    sprintf(end_line, "completed req \"%s\" on %d total reqs %d", client_msg, childpid, *p_mmap );
     log_write(end_line);
     close(client_fd);
+    log_write("wrote to memory");
   }
 }
 
@@ -187,7 +193,7 @@ protocol_result do_auth_read(const void *msg, void *username, void *buf) {
   if ( ! do_auth_user(username) )
     return authorization;
   // Copy message, IOW string to the right of the colon, into buffer for caller
-  strncpy(buf, msg + rc, msg_len - rc);
+  strcpy(buf, msg + rc);
   return success;
   
 }
@@ -249,18 +255,21 @@ void log_write(char *msg) {
 
 int main(int argc, char** argv) {
   int sockfd;
-  int numchild = 1000;
+  int numchild = 10;
   char host[MAXARGBUF], port[MAXARGBUF];
+  int pids[numchild]; // track pids of child procs
+  int *statuses[numchild]; // array of shared memory pointers for children
+  char cyclebuf[MAXARGBUF]; // buffer for logging thread status
   pid_t childpid;
   if ( argc != 3 ) {
-    printf("Using default host:port %s:%s\n", default_host, default_port);
-    strncpy(host, default_host, MAXARGBUF);
-    strncpy(port, default_port, MAXARGBUF);
+    strcpy(host, default_host);
+    strcpy(port, default_port);
   }
   else {
-    strncpy(host, argv[1], MAXARGBUF);
-    strncpy(port, argv[2], MAXARGBUF);
+    strcpy(host, argv[1]);
+    strcpy(port, argv[2]);
   }
+  printf("Running with %d children on host:port %s:%s\n", numchild, host, port );
 
   char logfile[] = "/tmp/myserver.log";
   fp = fopen(logfile, "a");
@@ -275,16 +284,41 @@ int main(int argc, char** argv) {
   sockfd = get_socket_fd(host, port);
 
   for ( int i = 0 ; i < numchild; i++) {
+    statuses[i] = create_shared_mem();
+  }
+  for ( int i = 0 ; i < numchild; i++) {
     childpid = fork();
     if ( childpid == -1 ) {
       perror("could not fork");
     }
     else if ( childpid == 0 ) {
-      do_thread_work(sockfd);
+      do_thread_work(sockfd, statuses[i]);
     }
+    else { // this is parent code
+      pids[i] = childpid;
+    }
+  }
+
+  for ( int i = 0 ; i< numchild; i++ ) {
+    sprintf(cyclebuf, "have child pid %d", pids[i]);
+    log_write(cyclebuf);
+  }
+  while (true) {
+    int total_reqs = 0;
+    sleep(2);
+    for ( int i = 0 ; i < numchild; i++ ) {
+      total_reqs += *statuses[i];
+    }
+    sprintf(cyclebuf, "total requests %d", total_reqs);
+    log_write(cyclebuf);
   }
   while (waitpid(-1, NULL, 0) > 0);
   close(sockfd);
   printf("finished all work counted %d\n", count);
   return 0;
+}
+
+int *create_shared_mem() {
+  int *result =  mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+  return result;
 }
