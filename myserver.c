@@ -47,7 +47,7 @@ int readline(int fd, char *client_buf);
 protocol_result do_auth_read(const void *msg, void *username, void *buf);
 void log_write(char *msg);
 int *create_shared_mem();
-void do_thread_work(int sockfd, int *p_mmap);
+void do_child_work(int sockfd, int *p_mmap);
 
 /*
  * get_socket_fd: function for setting up the server socket.
@@ -95,9 +95,9 @@ int get_socket_fd(char *host, char *port) {
 }
 
 /*
- * do_thread_work: function performed in worker processes
+ * do_child_work: function performed in worker processes
  */
-void do_thread_work(int sockfd, int *p_mmap) {
+void do_child_work(int sockfd, int *p_mmap) {
   int client_fd;
   struct sockaddr_in client_addr;
   char prompt[MAXARGBUF]; // buffer for sending prompt to client on connect
@@ -147,13 +147,12 @@ void do_thread_work(int sockfd, int *p_mmap) {
     }
     sprintf(request_line, "server %d recvd message \"%s\" from user %s", childpid, client_msg, username);
     log_write(request_line);
-    // sleep(3); // do computationally intensive work which adds latency
+    sleep(4); // do computationally intensive work which adds latency
     send(client_fd, request_line, strlen(request_line), 0);
     (*p_mmap)++;
     sprintf(end_line, "completed req \"%s\" on %d total reqs %d", client_msg, childpid, *p_mmap );
     log_write(end_line);
     close(client_fd);
-    log_write("wrote to memory");
   }
 }
 
@@ -255,7 +254,7 @@ void log_write(char *msg) {
 
 int main(int argc, char** argv) {
   int sockfd;
-  int numchild = 10;
+  int numchild = 1000;
   char host[MAXARGBUF], port[MAXARGBUF];
   int pids[numchild]; // track pids of child procs
   int *statuses[numchild]; // array of shared memory pointers for children
@@ -292,7 +291,7 @@ int main(int argc, char** argv) {
       perror("could not fork");
     }
     else if ( childpid == 0 ) {
-      do_thread_work(sockfd, statuses[i]);
+      do_child_work(sockfd, statuses[i]);
     }
     else { // this is parent code
       pids[i] = childpid;
