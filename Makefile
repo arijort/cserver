@@ -1,8 +1,4 @@
-#TARGET_EXEC ?= a.out
-
 GCC = /usr/bin/gcc
-BUILD_DIR ?= ./build
-
 CFLAGS ?= -std=gnu99 -pthread
 
 myserver: myserver.c
@@ -13,4 +9,4 @@ cclient: cclient.c
 .PHONY: clean
 
 clean:
-		$(RM) -r myserver cclient
+	$(RM) -r myserver cclient
