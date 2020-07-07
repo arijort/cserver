@@ -31,7 +31,6 @@
 
 typedef enum protocol_result {exception = -2, authorization = -1, success = 0} protocol_result;
 
-static const int MMAPSIZE = 64; // size of memory segment shared with child procs
 static const int MAXARGBUF = 32; // max size of parameters for host, port.
 static const int MAXBUF = 1024; // max size of message received from client
 static const int BACKLOG = 100; // backlog on listen()
@@ -147,7 +146,7 @@ void do_child_work(int sockfd, int *p_mmap) {
     }
     sprintf(request_line, "server %d recvd message \"%s\" from user %s", childpid, client_msg, username);
     log_write(request_line);
-    sleep(4); // do computationally intensive work which adds latency
+    sleep(3); // do computationally intensive work which adds latency
     send(client_fd, request_line, strlen(request_line), 0);
     (*p_mmap)++;
     sprintf(end_line, "completed req \"%s\" on %d total reqs %d", client_msg, childpid, *p_mmap );
@@ -183,7 +182,6 @@ bool do_auth_user(const char *username) {
 protocol_result do_auth_read(const void *msg, void *username, void *buf) {
   int rc = 0;
   char *delim_point;
-  size_t msg_len = strlen(msg);
   delim_point = strchr(msg, delim);
   if ( delim_point == NULL )
     return exception; // protocol error if no colon
