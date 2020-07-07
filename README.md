@@ -3,9 +3,9 @@
 This project implements a simple client and server written in C to demonstrate different techniques for multiprocessing while maintaining global state.
 
 ## Client implementation with pthreads and mutex
-The client is implemented using a multi-threaded model using pthreads and a simple static global variable which is made thread-safe with a simple mutex. Threads count the number of reqeusts they have created to enable the main thread to report a total count.
+The client is implemented using a multi-threaded model using pthreads and a static global variable which is made thread-safe with a single mutex. Threads count the number of reqeusts they have created to enable the main thread to report a total count.
 
-Clients create the protocol string and send it to the server over connected socket.
+Clients create the protocol string and send it to the server over the connected socket.
 
 ## Server implementation using fork and shared memory
 The server is implemented using forked child processes which communicate with the parent process using shared memory. Child processes write the number of requests they have handled into shared memory segments enabling the parent process to get a total count of requests handled. Both child processes and the parent write into an append-only log file.
@@ -16,15 +16,16 @@ Server child processes use a naive sleep to simulate some computation which woul
 
 In the basic configuration, the server creates 1000 child processes to demonstrate the viability of sustaining 1000 simultaneous connections on one machine.
 
-A very basic measurement of server memory usage indicates 350MB for 1000 threads.  Each instance consumes 144KB of resident memory
-Before:
+A very basic measurement of server memory usage indicates 350MB for 1000 threads.  Each instance consumes 144KB of resident memory.
+
+Host memory usage before:
 ```
 arijort@mowawa:~/shadows/cserver$ free
               total        used        free      shared  buff/cache   available
 Mem:        2035480      449528      814580        4156      771372     1380372
 ```
 
-During server runtime.
+During server runtime:
 ```
 arijort@mowawa:~/shadows/cserver$ free
               total        used        free      shared  buff/cache   available
@@ -58,9 +59,9 @@ Running with 1000 children on host:port localhost:31337
 
 The client takes parameters as follows:
 
-cclient <host> <port> <number of child threads> <message> 
+`cclient <host> <port> <number of child threads> <message>`
 
-The message must conform to the protocol ( username:message ) or will be rejected.
+The message must conform to the protocol (username:message) or will be rejected.
 
 ```
 arijort@mowawa:~/shadows/cserver$ ./cclient localhost 31337 1000 "arijort:message for you"
@@ -74,7 +75,7 @@ The client is able to create 1000 threads sending 1 message each to the server i
 
 This snippet from the server log file indicates 1000 client requests arrived within 170 milliseconds. After the artificial 3 second latency, they were handled in the same amount of time.
 
-Note: each server handler process logs the "recvd message" immediately after it authorizes the client request. It then logs the "completed" line after the artiticial latency. This analysis shows the server is able to sustain 1000 simultaneous connections.
+Note: each server handler process logs the "recvd message" immediately after it authorizes the client request. It then logs the "completed" line after the artificial latency. This analysis shows the server is able to sustain 1000 simultaneous connections.
 
 ```
 arijort@mowawa:~/shadows/cserver$ egrep 'recvd.*lalala' /tmp/myserver.log | wc -l
@@ -95,3 +96,5 @@ arijort@mowawa:~/shadows/cserver$
 The server child processes could be managed with a dynamic pool of processes in the manner of the pre-forking server model used by apache.
 
 Future work could identify a clear breaking point for this server model but it lies beyond 1000 simultaneous connections.
+
+[GitHub Repo](https://github.com/arijort/cserver)
