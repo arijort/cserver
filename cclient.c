@@ -105,7 +105,6 @@ int main(int argc, char **argv) {
   }
 
   msg_ctx = prepare_server_message(addy, req_buf);
-  printf("create msg_ctx for request %s\n", msg_ctx.message);
 
   for ( int i = 0; i < num_threads; i++ ) {
     //if (pthread_create(&threads[i], NULL, do_client_thread, addy) != 0) {
