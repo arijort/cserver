@@ -72,23 +72,6 @@ handled 1000 requests
 
 The client is able to create 1000 threads sending 1 message each to the server in 170 milliseconds.
 
-1000 requests in 171 milliseconds
-
-/*
- * Design:
- *
- * 1) Server will bind to a TCP or UDP port and listen for client communications
- * 2) Client performs some kind of auth transaction with the server, such as providing a valid username
- * 3) Client may send multiple messages or transactions to the server.  The purpose of this exchange is unspecified, except that these transactions should mutate some global state such as an append-only log.
- * 4) Server may accept multiple client connections.  Whether those connections are serviced in serial or parallel is unspecified.
- *
- *  Analysis:
- *
- *  1) Please provide a test that demonstrates your server's ability to handle 1000 concurrent clients.  The definition of "concurrent" is something we ask you to specify and justify.  Any analysis on transaction throughput is appreciated.
- *
- */
-
-
 This snippet from the server log file indicates 1000 client requests arrived within 170 milliseconds. After the artificial 3 second latency, they were handled in the same amount of time.
 
 Note: each server handler process logs the "recvd message" immediately after it authorizes the client request. It then logs the "completed" line after the artiticial latency. This analysis shows the server is able to sustain 1000 simultaneous connections.
@@ -112,4 +95,3 @@ arijort@mowawa:~/shadows/cserver$
 The server child processes could be managed with a dynamic pool of processes in the manner of the pre-forking server model used by apache.
 
 Future work could identify a clear breaking point for this server model but it lies beyond 1000 simultaneous connections.
-
