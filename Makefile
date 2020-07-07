@@ -1,10 +1,10 @@
 GCC = /usr/bin/gcc
-CFLAGS ?= -std=gnu99 -pthread
+CFLAGS = -Wall -std=gnu99 -pthread
 
 myserver: myserver.c
-	$(GCC) $(CFLAGS) -c $< -o $@
+	$(GCC) $(CFLAGS) -o $@ $<
 cclient: cclient.c
-	$(GCC) $(CFLAGS) -c $< -o $@
+	$(GCC) $(CFLAGS) -o $@ $<
 
 .PHONY: clean
 
